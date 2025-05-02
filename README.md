@@ -1,4 +1,4 @@
-#Linux Overlay Mod Mapper
+# Linux Overlay Mod Mapper
 
 LOMM uses the fuse version of overlayfs to install mods onto any given game.
 Using Linux's OverlayFS system the core game remain untouched by the mods.
