@@ -1,11 +1,7 @@
-========================
-Linux Overlay Mod Mapper
-========================
+#Linux Overlay Mod Mapper
 
 LOMM uses the fuse version of overlayfs to install mods onto any given game.
 Using Linux's OverlayFS system the core game remain untouched by the mods.
-
--------------------------
 
 Usage:
 
@@ -37,8 +33,5 @@ Usage:
     -d/--debug      Debug process
     -w/--wait       Wait in terminal to allow automatic unmounting.
 
--------------------------
 
- Copyright: Why? Anyone with the internet can write this.
-
--------------------------
+ Copyright: Why? Anyone with the internet can write this. GPL2 it is then!
