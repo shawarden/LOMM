@@ -1,0 +1,266 @@
+#!/bin/env bash
+
+function dout() {
+	if [ ! -z DEBUG ]
+	then
+		echo "DEBUG - $@" 1>&2
+	fi
+}
+
+function eout() {
+	echo "ERROR - $@" 1>&2
+}
+
+function usage() {
+	echo "
+========================
+Linux Overlay Mod Mapper
+========================
+
+LOMM uses the fuse version of overlayfs to install mods onto any given game.
+Using Linux's OverlayFS system the core game remain untouched by the mods.
+
+-------------------------
+
+Usage:
+
+  Required:
+
+    -g/--game [dir] The game directory that will be overlayed.
+                    This directory becomes functionally write-protected.
+    -m/--mod  [dir] Mod directory to be overlayed over the --game directory
+                    Can be specified multiples times.
+                    Mods load in order given.
+                    Mods loaded here will be layered before any --base mods
+                    If --top and --base directories are not set then the last
+                     mod layer set here will be used to capture changes.
+    -b/--base [dir] Directory that contains a collection of mods to overlay
+                     over the --game directory.
+                    Must contain a \"mods\" directory that contains the mods
+                    Mods are loaded alphabetically.
+                    If no --top specified then overlay_store directory will be
+                     created here.
+
+  Optional:
+  
+    -t/--top [dir]  Allows you to specify the writable, top level directory that
+                     captures all changes made to the current stack.
+                    If not specified it will default to the last --mod specified
+                     directory or a dedicated overlay_store folder in --base.
+    -n/--nope       Prints what would happen without actually doing it.
+                     Implies --debug because of the implication.
+    -d/--debug      Debug process
+    -w/--wait       Wait in terminal to allow automatic unmounting.
+
+-------------------------
+
+ Copyright: Why? Anyone with the internet can write this.
+
+-------------------------
+"
+exit "${@}"
+}
+
+POSITIONAL_ARGS=()
+
+overlayBin=$(command -v fuse-overlayfs)
+dout overylay binary is $overlayBin
+
+if [ "${overlayBin}" == "" ]
+then
+	eout Unable to locate fuse-overlayfs binary. Please install.
+	usage 1
+fi
+
+layerStack=()
+
+while [[ $# -gt 0 ]]
+do
+	case $1 in
+	-g|--game|-r|--root)
+		# Set base game directory.
+		# This directory effectively becomes read-only with any changes being
+		#  redirected to the writable top layer.
+		if [ -d "${2}" ]
+		then
+			if ! mount | grep "^fuse-overlayfs on ${2}" &>/dev/null
+			then
+				gameDir="${2}"
+				dout game directory set to \"$gameDir\"
+			else
+				eout Game directory \"${2}\" already overlayed.
+				eout To create a new stack please unmount with: fusermount -u \"${2}\" first.
+				exit 1
+			fi
+		else
+			eout Game directory \"${2}\" does not exist.
+			usage 1
+		fi
+		shift
+		shift
+		;;
+	-b|--base)
+		if [ -d "${2}/mods" ]
+		then
+			# Overlay stack
+			# Layers stack bottom/last up/forst
+			dout Layer stack appended by contents of \"${2}\"/mods/
+			layerStack+=(
+				$(
+					for dir in $(find "${2}"/mods/ -maxdepth 1 -type d | tail -n+2 | sort -Vr)
+					do
+						echo "${dir}"
+					done
+				)
+			)
+			dout Layers stack is now \"${layerStack[@]}\"
+		else
+			eout Mods directory \"${2}/mods\" does not exist.
+			usage 1
+		fi
+		shift
+		shift
+		;;
+	-m|--mod)
+		if [ -d "${2}" ]
+		then
+			dout adding \"${2}\" to layer stack.
+			layerStack+=("${2}")
+			dout Layers stack is now \"${layerStack[@]}\"
+		else
+			eout Mod directory \"${2}\" does not exist.
+			usage 1
+		fi
+		shift
+		shift
+		;;
+	-l|--live|-s|--store|-t|--top)
+		topDir="${2}"
+		dout top level storage directory is "$topDir"
+		if [ ! -d "${topDir}" ]
+		then
+			dout Top overlay does not exist and will be created.
+		fi
+		shift
+		shift
+		;;
+	-u|--usage|-h|--help)
+		# Get help
+		usage 0
+		;;
+	-n|--nope)
+		dout Setting dry run mode. Commands will be displayed but not run.
+		NOPE=1
+		DEBUG=1	# Because of the implication
+		shift
+		;;
+	-d|--debug)
+		dout Debug mode set via option. Output will be incomplete.
+		dout For complete debug output run \"DEBUG=1 $0 $@\" instead.
+		DEBUG=1
+		shift
+		;;
+	-w|--wait)
+		dout Will wait in console for termination key.
+		WAIT=1
+		shift
+		;;
+	*)
+		POSITIONAL_ARGS+=("$1")
+		shift
+		;;
+	esac
+done
+
+if [ ! -d "${gameDir}" ] || [ ${#layerStack[@]} -lt 1 ]
+then
+	eout Game directory or mod layer stack not specified.
+	usage 1
+fi
+
+IFS=$'\n'
+
+if ! workDir=$(mktemp -d /tmp/$USER.fuse-overlayfs.workdir.XXXXXXX)
+then
+	eout Unable to create working directory "$workDir"
+	exit 1
+fi
+dout Working: $(realpath "${workDir}")
+
+# Set upper most, storage layer.
+# Any changes made to game dir while overlayed will be stored here.
+if [ -z $topDir ]
+then
+	dout Top level directory not set.
+	# Top layer not specified.
+	# Find a dedicated/existing overlay_store directory?
+	topDir="$(realpath "${layerStack[-1]}"/../overlay_store)"
+	dout Checking for "$topDir"
+	if [ ! -d $topDir ]
+	then
+		dout "$topDir" does not exist. Using last entry in mod layer stack.
+		# overlay_store doesn't exist.
+		# Set to last layer in overlay.
+		topDir="${layerStack[-1]}"
+		dout Top directory set to \"$topDir\"
+	fi
+fi
+
+dout Capture: $(realpath "${topDir}")
+
+# Output layers in overlay stack
+for dir in "${layerStack[@]}"
+do
+	dout Stack: $(realpath "${dir}")
+done
+dout Bottom: $(realpath "${gameDir}")
+
+# Create storage layer directory if required.
+mkdirCMD="mkdir -pv \"${topDir}\""
+dout CMD: $mkdirCMD
+
+# Create overlay
+overlayCMD="\"${overlayBin}\" -o \
+lowerdir=$(
+	for dir in "${layerStack[@]}"
+	do
+		echo -ne "\"${dir}\":"
+	done
+)\"${gameDir}\",\
+upperdir=\"${topDir}\",\
+workdir=\"${workDir}\" \
+\"${gameDir}\" \
+"
+dout CMD: $overlayCMD
+
+if [ -z $NOPE ]
+then
+	if ! eval $mkdirCMD
+	then
+		dout Unable to create ${topDir}
+		usage 1
+	fi
+
+	if eval $overlayCMD
+	then
+		if [ ! -z $WAIT ]
+		then
+			dout Wait for terminal input to unmount overlay.
+			read -n 1 -s -r -p "Press any key to unmount"
+		fi
+	else
+		eout Unable to execute $overlayCMD
+		usage 1
+	fi
+
+	if [ ! -z $WAIT ]
+	then
+		until fusermount -u "${gameDir}"
+		do
+			dout Waiting for direcory to be unused.
+			sleep 5s
+		done
+	fi
+fi
+
+
