@@ -5,6 +5,8 @@ Using Linux's OverlayFS system the core game remain untouched by the mods.
 
 Usage:
 
+  fuserlay -g|--game /path/to/game -m|--mod /path/to/mod | -b|--base /path/to/collection
+
   Required:
 
     -g/--game [dir] The game directory that will be overlayed.
