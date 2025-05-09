@@ -22,7 +22,7 @@ Using Linux's OverlayFS system the core game remain untouched by the mods.
 
 -------------------------
 
-Usage:
+Usage: $0 -g /path/to/game -m /path/to/mod | -b /path/to/collection
 
   Required:
 
@@ -72,6 +72,7 @@ then
 	usage 1
 fi
 
+IFS=$'\n'
 layerStack=()
 
 while [[ $# -gt 0 ]]
@@ -178,15 +179,6 @@ then
 	usage 1
 fi
 
-IFS=$'\n'
-
-if ! workDir=$(mktemp -d /tmp/$USER.fuse-overlayfs.workdir.XXXXXXX)
-then
-	eout Unable to create working directory "$workDir"
-	exit 1
-fi
-dout Working: $(realpath "${workDir}")
-
 # Set upper most, storage layer.
 # Any changes made to game dir while overlayed will be stored here.
 if [ -z $topDir ]
@@ -194,29 +186,32 @@ then
 	dout Top level directory not set.
 	# Top layer not specified.
 	# Find a dedicated/existing overlay_store directory?
-	topDir="$(realpath "${layerStack[-1]}"/../overlay_store)"
+	topDir="$(realpath "${layerStack[-1]}"/../../overlay_store)"
 	dout Checking for "$topDir"
 	if [ ! -d $topDir ]
 	then
-		dout "$topDir" does not exist. Using last entry in mod layer stack.
+		dout "$topDir" does not exist. Using generic store.
 		# overlay_store doesn't exist.
 		# Set to last layer in overlay.
-		topDir="${layerStack[-1]}"
+		topDir="${layerStack[-1]}/../overlay_store"
 		dout Top directory set to \"$topDir\"
 	fi
 fi
+
+workDir="$(realpath "${topDir%_overlay_store}"/../working)"
+dout Working: "${workDir}"
 
 dout Capture: $(realpath "${topDir}")
 
 # Output layers in overlay stack
 for dir in "${layerStack[@]}"
 do
-	dout Stack: $(realpath "${dir}")
+	dout Stack..: $(realpath "${dir}")
 done
-dout Bottom: $(realpath "${gameDir}")
+dout Bottom.: $(realpath "${gameDir}")
 
 # Create storage layer directory if required.
-mkdirCMD="mkdir -pv \"${topDir}\""
+mkdirCMD="mkdir -pv \"${topDir}\" \"${workDir}\""
 dout CMD: $mkdirCMD
 
 # Create overlay
@@ -262,5 +257,3 @@ then
 		done
 	fi
 fi
-
-
